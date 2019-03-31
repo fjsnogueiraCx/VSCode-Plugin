@@ -1,16 +1,17 @@
 import { URL } from 'url';
-import * as fs from 'fs';
+import Zipper from './Zipper';
 const path = require('path');
-const JSZip = require('jszip');
 const request = require('superagent');
 
 export class Client {
 	private serverURL: URL;
 	private accessToken: String;
+	private zipper: Zipper;
 
 	constructor(host: URL) {
 		this.serverURL = host;
 		this.accessToken = '';
+		this.zipper = new Zipper();
 	}
 
 	//TODO: parameters like user/password should be passed to the constructor
@@ -24,7 +25,7 @@ export class Client {
 				grant_type: 'password',
 				scope: 'sast_rest_api offline_access',
 				client_id: 'resource_owner_client',
-				client_secret: ``
+				client_secret: `014DF517-39D1-4453-B7B3-9930C563627C`
 			})
 			.then(
 				(response: any) => {
@@ -71,17 +72,19 @@ export class Client {
 			);
 	}
 
-	public async uploadSourceCode(projectId: number, pathToSource: string): Promise<any> {
+	public async uploadSourceCode(projectId: number, pathToSource: string, tempFileName: string): Promise<any> {
 		if (this.accessToken === '') {
 			throw Error('Must login first');
 		}
-		let compressedSource = await this.zipSource(pathToSource, 'out');
+
+		let compressedSource = await this.zipSource(pathToSource, tempFileName);
+
 		return request
 			.post(`${this.serverURL}/CxRestAPI/projects/${projectId}/sourceCode/attachments`)
 			.set('Authorization', `Bearer ${this.accessToken}`)
 			.accept('application/json')
 			.field('id', projectId)
-			.attach('zippedSource', compressedSource)
+			.attach('zippedSource', compressedSource.fullPath)
 			.then(
 				(response: any) => {
 					console.log(response);
@@ -93,20 +96,8 @@ export class Client {
 	}
 
 	private async zipSource(path: string, fileName: string) {
-		let jszip = new JSZip();
-		let stat: fs.Stats = fs.statSync(path);
-		let zip = stat.isDirectory ? jszip.folder(path) : jszip.file(path);
-
-		console.log(`Compressing ${path}`);
-		return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
-		// .generateNodeStream({ type: 'nodebuffer', streamFiles: true })
-		// .pipe(fs.createWriteStream(`${fileName}.zip`))
-		// .on('finish', () => {
-		// 	console.log('out.zip written.');
-		// })
-		// .on('error', (e: Error) => {
-		// 	console.log(`error compressing file: ${e.message}`);
-		// });
+		let zippedSource = await this.zipper.zipDirectory(path, fileName);
+		return zippedSource;
 	}
 
 	public async getProject(projectName: string, teamId: number): Promise<string> {
