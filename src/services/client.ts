@@ -1,6 +1,6 @@
 import { URL } from 'url';
 import Zipper from './Zipper';
-const path = require('path');
+import { StatusBarAlignment } from 'vscode';
 const request = require('superagent');
 
 export class Client {
@@ -14,7 +14,6 @@ export class Client {
 		this.zipper = new Zipper();
 	}
 
-	//TODO: parameters like user/password should be passed to the constructor
 	public async login(user: string, pass: string) {
 		return await request
 			.post(`${this.serverURL}/CxRestAPI/auth/identity/connect/token`)
@@ -38,7 +37,7 @@ export class Client {
 			);
 	}
 
-	//TODO: add getTeamByName
+	//TODO: add getTeamByName, uses hard coded team 1 CxServer
 	public async createProject(owningTeam: string, projectName: string, isPublic: boolean): Promise<number> {
 		if (this.accessToken === '') {
 			throw Error('Must login first');
@@ -149,5 +148,88 @@ export class Client {
 			throw Error(err);
 		}
 		return response.body.id;
+	}
+
+	public async getScanStatus(scanId: number) {
+		if (this.accessToken === '') {
+			throw Error('Must login first');
+		}
+
+		let response;
+		try {
+			response = await request
+				.get(`${this.serverURL}/CxRestAPI/sast/scans/${scanId}`)
+				.set('Authorization', `Bearer ${this.accessToken}`);
+		} catch (err) {
+			console.log(`Failed creating new scan error`);
+			throw Error(err);
+		}
+
+		return response.body.status;
+	}
+
+	public generateScanReport(scanId: string, filePath: string): any {
+		if (this.accessToken === '') {
+			throw Error('Must login first');
+		}
+		let reportURI;
+
+		(async () => {
+			try {
+				reportURI = await this.requestReport(scanId, 'pdf');
+				this.createReport(reportURI, 'pdf');
+			} catch (err) {
+				console.log(`Failed Generating report`);
+				throw Error(err);
+			}
+		})();
+	}
+
+	private async requestReport(scanId: string, reportType: string) {
+		const response = await request
+			.post(`${this.serverURL}/CxRestAPI/reports/sastScan/`)
+			.set('Authorization', `Bearer ${this.accessToken}`)
+			.send({
+				reportType: reportType,
+				scanId: scanId
+			});
+
+		return response.body.links.report.uri;
+	}
+
+	private async createReport(reportURI: string, reportType: string) {
+		let isReportReady = await this.reportPolling(1000, reportURI);
+		if (!isReportReady) {
+			throw Error('Report was not ready within time limits');
+		}
+		request
+			.get(`${this.serverURL}` + reportURI)
+			.set('Authorization', `Bearer ${this.accessToken}`)
+			.then((response: any) => {
+				return response.body;
+			});
+	}
+
+	//TODO: should also return false on failed status
+	private async reportPolling(maxAttempts: number, reportURI: string) {
+		let isReportFinish: boolean = false;
+		while (maxAttempts > 0 && !isReportFinish) {
+			await this.wait(1000);
+			await request
+				.get(`${this.serverURL}` + reportURI + '/status')
+				.set('Authorization', `Bearer ${this.accessToken}`)
+				.then((response: any) => {
+					if (response.body.status.value === 'Created') {
+						isReportFinish = true;
+					} else {
+						--maxAttempts;
+					}
+				});
+		}
+		return isReportFinish;
+	}
+
+	private wait(waitMs: number) {
+		return new Promise(resolve => setTimeout(resolve, waitMs));
 	}
 }
