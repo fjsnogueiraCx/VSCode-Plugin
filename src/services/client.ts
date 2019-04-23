@@ -1,6 +1,7 @@
 import { URL } from 'url';
 import Zipper from './Zipper';
 import { StatusBarAlignment } from 'vscode';
+import * as fs from 'fs';
 const request = require('superagent');
 
 export class Client {
@@ -135,7 +136,7 @@ export class Client {
 			response = await request
 				.post(`${this.serverURL}/CxRestAPI/sast/scans`)
 				.set('Content-Type', 'application/json' + ';v=1.0')
-				.set('Authorization', `Bearer ${this.accessToken}`)
+				.set(`Authorization`, `Bearer ${this.accessToken}`)
 				.send({
 					projectId: projectId,
 					isIncremental: isIncremental,
@@ -168,16 +169,16 @@ export class Client {
 		return response.body.status;
 	}
 
-	public generateScanReport(scanId: string, filePath: string): any {
+	public generateScanReport(scanId: number, filePath: string): any {
 		if (this.accessToken === '') {
 			throw Error('Must login first');
 		}
 		let reportURI;
-
 		(async () => {
 			try {
 				reportURI = await this.requestReport(scanId, 'pdf');
-				this.createReport(reportURI, 'pdf');
+				let reportData = await this.createReport(reportURI);
+				this.saveReport(filePath + scanId + '.pdf', reportData);
 			} catch (err) {
 				console.log(`Failed Generating report`);
 				throw Error(err);
@@ -185,9 +186,11 @@ export class Client {
 		})();
 	}
 
-	private async requestReport(scanId: string, reportType: string) {
+	private async requestReport(scanId: number, reportType: string) {
+		let requestURL: string = `${this.serverURL.href}CxRestAPI/reports/sastScan/`;
 		const response = await request
-			.post(`${this.serverURL}/CxRestAPI/reports/sastScan/`)
+			//.post(`${this.serverURL.href}CxRestAPI/reports/sastScan/`)
+			.post(requestURL)
 			.set('Authorization', `Bearer ${this.accessToken}`)
 			.send({
 				reportType: reportType,
@@ -197,14 +200,15 @@ export class Client {
 		return response.body.links.report.uri;
 	}
 
-	private async createReport(reportURI: string, reportType: string) {
+	private async createReport(reportURI: string): Promise<string> {
 		let isReportReady = await this.reportPolling(1000, reportURI);
 		if (!isReportReady) {
 			throw Error('Report was not ready within time limits');
 		}
-		request
-			.get(`${this.serverURL}` + reportURI)
+		return request
+			.get(`${this.serverURL.href}` + 'cxrestapi' + reportURI)
 			.set('Authorization', `Bearer ${this.accessToken}`)
+			.responseType('blob')
 			.then((response: any) => {
 				return response.body;
 			});
@@ -216,7 +220,7 @@ export class Client {
 		while (maxAttempts > 0 && !isReportFinish) {
 			await this.wait(1000);
 			await request
-				.get(`${this.serverURL}` + reportURI + '/status')
+				.get(`${this.serverURL.href}` + 'cxrestapi' + reportURI + '/status')
 				.set('Authorization', `Bearer ${this.accessToken}`)
 				.then((response: any) => {
 					if (response.body.status.value === 'Created') {
@@ -227,6 +231,14 @@ export class Client {
 				});
 		}
 		return isReportFinish;
+	}
+
+	private async saveReport(reportFullPath: string, reportData: string) {
+		fs.writeFile(reportFullPath, reportData, { flag: 'w' }, err => {
+			if (err) {
+				throw new Error('Error creating report file:' + err);
+			}
+		});
 	}
 
 	private wait(waitMs: number) {

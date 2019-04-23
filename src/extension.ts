@@ -14,6 +14,7 @@ var userPass = '';
 // your extension is activated the very *first* time the command is executed
 export function activate(context: vscode.ExtensionContext) {
 	let client: Client;
+
 	// let properties = PropertiesReader(`/config/properties.ini`);
 
 	// The commandId parameter must match the command field in package.json
@@ -45,7 +46,7 @@ export function activate(context: vscode.ExtensionContext) {
 					const projectId: number = await client.createProject('CxServer', `${projectName}`, true);
 					await client.uploadSourceCode(projectId, selectedSource, `${projectName}` + projectId);
 					let scanId = await client.createNewScan(projectId, false, true, true, 'Scan from VSCode');
-					displayScanStatus(client, scanId);
+					await displayScanStatus(client, scanId);
 				} catch (err) {
 					scanStatus = err;
 					console.log(err);
@@ -65,6 +66,11 @@ async function displayScanStatus(client: Client, scanId: number) {
 		status = await client.getScanStatus(scanId);
 		statusBarItem.text = `Scan status: ${status.name}...`;
 	} while (status.name !== 'Finished' && status.name !== 'Failed');
+	//TODO: move this logic to its own function
+	if (`${status.name === 'Finished'}`) {
+		let reportPath: string = vscode.env.appRoot + path.sep + 'reports' + path.sep;
+		client.generateScanReport(scanId, reportPath);
+	}
 	statusBarItem.hide();
 }
 
@@ -75,6 +81,19 @@ function showInputBox(question: string, defaultValue: string, isObscure: boolean
 		password: isObscure
 	};
 	return vscode.window.showInputBox(inputBoxOptions);
+}
+
+function testReports(user: string, pass: string, scanId: number) {
+	(async () => {
+		let client = new Client(new URL('http://localhost'));
+		try {
+			await client.login(user, pass);
+			let reportPath: string = vscode.env.appRoot + path.sep + 'reports' + path.sep;
+			await client.generateScanReport(scanId, reportPath);
+		} catch (err) {
+			console.log(err);
+		}
+	})();
 }
 
 // this method is called when your extension is deactivated
